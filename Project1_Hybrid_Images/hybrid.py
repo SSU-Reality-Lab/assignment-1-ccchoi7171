@@ -17,6 +17,18 @@ def gaussian_blur_kernel_2d(sigma, height, width):
         (height x width) 크기의 커널을 반환합니다. 이 커널로 이미지를 컨볼브하면
         가우시안 블러가 적용된 결과가 나옵니다.
     '''
+    if sigma <= 0:
+        k = np.zeros((height, width), dtype=np.float32)
+        k[height // 2, width // 2] = 1.0
+        return k
+    y = np.arange(height, dtype=np.float32)
+    x = np.arange(width, dtype=np.float32)
+    cy, cx = (height - 1) * 0.5, (width - 1) * 0.5
+    yy, xx = np.meshgrid(y, x, indexing='ij')
+    r2 = (yy - cy) ** 2 + (xx - cx) ** 2
+    k = np.exp(-r2 / (2.0 * sigma * sigma)).astype(np.float32)
+    k /= k.sum()
+    return k
 
 def cross_correlation_2d(img, kernel):
     '''주어진 커널(크기 m x n )을 사용하여 입력 이미지와의
@@ -33,6 +45,26 @@ def cross_correlation_2d(img, kernel):
     '''출력(Output):
         입력 이미지와 동일한 크기(같은 너비, 높이, 채널 수)의 이미지를 반환합니다.
     '''
+    # (H,W) -> (H,W,1) 통일
+    src = img[..., None] if img.ndim == 2 else img
+    H, W, C = src.shape
+    kH, kW = kernel.shape
+    pH, pW = kH // 2, kW // 2
+
+    out = np.zeros((H, W, C), dtype=np.float32)
+    ker = kernel.astype(np.float32)
+
+    for c in range(C):
+        pad = np.pad(src[:, :, c].astype(np.float32), ((pH, pH), (pW, pW)), mode='constant')
+        for i in range(H):
+            for j in range(W):
+                s = 0.0
+                for u in range(kH):
+                    for v in range(kW):
+                        s += pad[i + u, j + v] * ker[u, v]
+                out[i, j, c] = s
+
+    return out.squeeze()
 
 def convolve_2d(img, kernel):
     '''cross_correlation_2d()를 사용하여 2D 컨볼루션을 수행합니다.
@@ -45,6 +77,7 @@ def convolve_2d(img, kernel):
     출력(Output):
         입력 이미지와 동일한 크기(같은 너비, 높이, 채널 수)의 이미지를 반환합니다.
     '''
+    return cross_correlation_2d(img, kernel[::-1, ::-1])
 
 
 def low_pass(img, sigma, size):
@@ -55,6 +88,8 @@ def low_pass(img, sigma, size):
     출력(Output):
         입력 이미지와 동일한 크기(같은 너비, 높이, 채널 수)의 이미지를 반환합니다.
     '''
+    k = gaussian_blur_kernel_2d(sigma, size, size)
+    return convolve_2d(img, k)
 
 def high_pass(img, sigma, size):
     '''주어진 sigma와 정사각형 커널 크기(size)를 사용해 고역통과(high-pass)
@@ -64,6 +99,7 @@ def high_pass(img, sigma, size):
     출력(Output):
         입력 이미지와 동일한 크기(같은 너비, 높이, 채널 수)의 이미지를 반환합니다.
     '''
+    return img - low_pass(img, sigma, size)
 
 def create_hybrid_image(img1, img2, sigma1, size1, high_low1, sigma2, size2,
         high_low2, mixin_ratio, scale_factor):
